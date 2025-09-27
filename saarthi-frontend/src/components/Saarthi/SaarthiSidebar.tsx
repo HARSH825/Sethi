@@ -1,4 +1,4 @@
-// src/components/Saarthi/SaarthiSidebar.tsx (COMPLETE FIXED VERSION - SIMPLE CLICK TO RECORD)
+// src/components/Saarthi/SaarthiSidebar.tsx (COMPLETE FIXED VERSION - PROPER SCROLLING)
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -67,6 +67,7 @@ const SaarthiSidebar: React.FC<SaarthiSidebarProps> = ({
   // Refs
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // Onboarding sequence
   const onboardingSequence: OnboardingField[] = ['name', 'dob', 'location', 'income', 'family_size', 'occupation', 'documents'];
@@ -77,9 +78,20 @@ const SaarthiSidebar: React.FC<SaarthiSidebarProps> = ({
     return () => cleanup();
   }, []);
 
-  // Auto-scroll to latest message
+  // FIXED: Better auto-scroll implementation
   useEffect(() => {
-    conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const scrollToBottom = () => {
+      if (conversationEndRef.current) {
+        conversationEndRef.current.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'end' 
+        });
+      }
+    };
+    
+    // Small delay to ensure DOM has updated
+    const timeoutId = setTimeout(scrollToBottom, 100);
+    return () => clearTimeout(timeoutId);
   }, [conversation]);
 
   const initializeSaarthi = async (): Promise<void> => {
@@ -239,38 +251,38 @@ const SaarthiSidebar: React.FC<SaarthiSidebarProps> = ({
     }
   }, [conversation, onboardingProgress]);
 
-  // FIXED: Enhanced navigation response handler
   const handleNavigationResponse = useCallback((data: any) => {
-    console.log('🧭 Processing navigation response:', data);
+  console.log('Processing navigation response:', data);
+  
+  // Add user transcript to chat
+  if (data.transcript && data.transcript.trim()) {
+    console.log('Adding user navigation message to chat:', data.transcript);
+    addMessage('user', data.transcript);
+  }
+
+  // Add Saarthi LLM response to chat
+  if (data.response && data.response.trim()) {
+    console.log('Adding Saarthi navigation response to chat:', data.response);
+    addMessage('saarthi', data.response);
     
-    // Add user transcript to chat
-    if (data.transcript && data.transcript.trim()) {
-      console.log('👤 Adding user navigation message to chat:', data.transcript);
-      addMessage('user', data.transcript);
-    }
+    // Speak the response
+    setTimeout(() => {
+      voiceService.speak(data.response);
+      setIsSpeaking(true);
+      setTimeout(() => setIsSpeaking(false), data.response.length * 40);
+    }, 500);
+  }
 
-    // FIXED: Add Saarthi LLM response to chat
-    if (data.response && data.response.trim()) {
-      console.log('🤖 Adding Saarthi navigation response to chat:', data.response);
-      addMessage('saarthi', data.response);
-      
-      // Speak the response
-      setTimeout(() => {
-        voiceService.speak(data.response);
-        setIsSpeaking(true);
-        setTimeout(() => setIsSpeaking(false), data.response.length * 40);
-      }, 500);
-    }
+  // Handle navigation actions - FIXED
+  if (data.action === "show_scheme" && data.targetScheme) {
+    console.log('Navigating to scheme:', data.targetScheme);
+    // Immediate navigation without delay
+    onPageChange?.('scheme-details', { schemeId: data.targetScheme });
+  }
+}, [onPageChange]);
 
-    // Handle navigation actions
-    if (data.action === 'show_scheme' && data.targetScheme) {
-      setTimeout(() => {
-        onPageChange?.('scheme-details', { schemeId: data.targetScheme });
-      }, 2000);
-    }
-  }, [onPageChange]);
 
-  // FIXED: Add scheme navigation response handler
+  // Add scheme navigation response handler
   const handleSchemeNavigationResponse = useCallback((data: any) => {
     console.log('🏛️ Processing scheme navigation response:', data);
     
@@ -280,7 +292,7 @@ const SaarthiSidebar: React.FC<SaarthiSidebarProps> = ({
       addMessage('user', data.transcript);
     }
 
-    // FIXED: Add Saarthi scheme response to chat
+    // Add Saarthi scheme response to chat
     if (data.response && data.response.trim()) {
       console.log('🤖 Adding Saarthi scheme response to chat:', data.response);
       addMessage('saarthi', data.response);
@@ -582,8 +594,11 @@ const SaarthiSidebar: React.FC<SaarthiSidebarProps> = ({
     <div className={`fixed right-0 top-0 h-full w-96 bg-gradient-to-br from-blue-900 to-blue-700 text-white shadow-2xl transform transition-transform duration-300 z-40 ${
       isMinimized ? 'translate-x-80' : 'translate-x-0'
     }`}>
-      <Card className="h-full bg-transparent border-none shadow-none">
-        <CardHeader className="bg-blue-800/50 pb-4">
+      {/* FIXED: Proper flex container structure */}
+      <div className="h-full flex flex-col">
+        
+        {/* FIXED: Header with explicit height */}
+        <div className="flex-shrink-0 bg-blue-800/50 p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Avatar className="w-10 h-10 bg-blue-600">
@@ -592,7 +607,7 @@ const SaarthiSidebar: React.FC<SaarthiSidebarProps> = ({
                 </AvatarFallback>
               </Avatar>
               <div>
-                <CardTitle className="text-lg font-bold text-white">Saarthi</CardTitle>
+                <h3 className="text-lg font-bold text-white">Saarthi</h3>
                 <p className="text-blue-200 text-sm">Your AI Assistant</p>
               </div>
             </div>
@@ -648,10 +663,11 @@ const SaarthiSidebar: React.FC<SaarthiSidebarProps> = ({
               )}
             </div>
           )}
-        </CardHeader>
+        </div>
 
-        <CardContent className="flex-1 p-0 flex flex-col h-[calc(100vh-200px)]">
-          <ScrollArea className="flex-1 p-4">
+        {/* FIXED: Scrollable chat area - takes remaining space */}
+        <div className="flex-1 overflow-hidden">
+          <ScrollArea ref={scrollAreaRef} className="h-full p-4">
             <div className="space-y-4">
               {conversation.map((msg) => (
                 <div
@@ -667,7 +683,7 @@ const SaarthiSidebar: React.FC<SaarthiSidebarProps> = ({
                         : 'bg-blue-800 text-white'
                     }`}
                   >
-                    <p className="text-sm">{msg.message}</p>
+                    <p className="text-sm leading-relaxed">{msg.message}</p>
                     {msg.sender === 'user' && (
                       <p className="text-xs text-blue-600 mt-1">
                         {msg.timestamp.toLocaleTimeString([], {
@@ -702,113 +718,117 @@ const SaarthiSidebar: React.FC<SaarthiSidebarProps> = ({
                 </div>
               )}
 
-              <div ref={conversationEndRef} />
+              {/* FIXED: Scroll anchor at the bottom */}
+              <div ref={conversationEndRef} className="h-2" />
             </div>
           </ScrollArea>
+        </div>
 
-          <div className="p-4 space-y-3 bg-blue-800/30">
-            {micPermission === false && (
-              <Alert className="bg-orange-600 border-orange-500 text-white">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription className="text-sm">
-                  🎤 Microphone access required for voice interaction
-                </AlertDescription>
-              </Alert>
-            )}
+        {/* FIXED: Fixed footer with controls */}
+        <div className="flex-shrink-0 p-4 space-y-3 bg-blue-800/30 border-t border-blue-700/50">
+          {micPermission === false && (
+            <Alert className="bg-orange-600 border-orange-500 text-white">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription className="text-sm">
+                🎤 Microphone access required for voice interaction
+              </AlertDescription>
+            </Alert>
+          )}
 
-            {connectionStatus !== 'connected' && (
-              <Alert className="bg-red-600 border-red-500 text-white">
-                <WifiOff className="h-4 w-4" />
-                <AlertDescription className="text-sm">
-                  WebSocket {connectionStatus} - Some features may not work properly
-                </AlertDescription>
-              </Alert>
-            )}
+          {connectionStatus !== 'connected' && (
+            <Alert className="bg-red-600 border-red-500 text-white">
+              <WifiOff className="h-4 w-4" />
+              <AlertDescription className="text-sm">
+                WebSocket {connectionStatus} - Some features may not work properly
+              </AlertDescription>
+            </Alert>
+          )}
 
-            <div className="flex items-center space-x-3">
-              {/* SIMPLE: Single click to start/stop recording */}
+          {/* FIXED: Recording controls - always visible and accessible */}
+          <div className="flex items-center space-x-3">
+            <Button
+              onClick={toggleRecording}
+              disabled={isProcessing}
+              className={`flex-1 h-12 ${
+                isRecording
+                  ? 'bg-red-600 hover:bg-red-700 animate-pulse'
+                  : isProcessing
+                  ? 'bg-yellow-600 hover:bg-yellow-700'
+                  : 'bg-green-600 hover:bg-green-700'
+              }`}
+            >
+              {isProcessing ? (
+                <Loader2 className="w-6 h-6 animate-spin mr-2" />
+              ) : isRecording ? (
+                <MicOff className="w-6 h-6 mr-2" />
+              ) : (
+                <Mic className="w-6 h-6 mr-2" />
+              )}
+              <span className="text-sm font-medium">
+                {isProcessing ? 'Processing...' :
+                 isRecording ? 'Click to Stop' :
+                 'Click to Record'}
+              </span>
+            </Button>
+
+            <Button
+              onClick={toggleSpeaking}
+              variant="outline"
+              size="sm"
+              className="bg-blue-700 border-blue-600 text-white hover:bg-blue-600"
+            >
+              {isSpeaking ? 
+                <VolumeX className="w-4 h-4" /> : 
+                <Volume2 className="w-4 h-4" />
+              }
+            </Button>
+          </div>
+
+          {/* User profile info */}
+          {userProfile && (
+            <div className="text-center">
+              <p className="text-blue-200 text-xs">
+                Logged in as {userProfile.name}
+              </p>
+              <p className="text-blue-300 text-xs">
+                Profile {onboardingProgress}% complete
+              </p>
+              {userProfile.attributes?.income && (
+                <Badge className="bg-green-600 text-white mt-1">
+                  ₹{userProfile.attributes.income.toLocaleString()}
+                </Badge>
+              )}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          {!isOnboarding && userProfile && (
+            <div className="flex space-x-2">
               <Button
-                onClick={toggleRecording}
-                disabled={isProcessing}
-                className={`flex-1 h-12 ${
-                  isRecording
-                    ? 'bg-red-600 hover:bg-red-700 animate-pulse'
-                    : isProcessing
-                    ? 'bg-yellow-600 hover:bg-yellow-700'
-                    : 'bg-green-600 hover:bg-green-700'
-                }`}
-              >
-                {isProcessing ? (
-                  <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                ) : isRecording ? (
-                  <MicOff className="w-6 h-6 mr-2" />
-                ) : (
-                  <Mic className="w-6 h-6 mr-2" />
-                )}
-                <span className="text-sm font-medium">
-                  {isProcessing ? 'Processing...' :
-                   isRecording ? 'Click to Stop' :
-                   'Click to Record'}
-                </span>
-              </Button>
-
-              <Button
-                onClick={toggleSpeaking}
+                onClick={() => onPageChange?.('recommendations')}
                 variant="outline"
                 size="sm"
-                className="bg-blue-700 border-blue-600 text-white hover:bg-blue-600"
+                className="flex-1 bg-blue-700 border-blue-600 text-white hover:bg-blue-600"
               >
-                {isSpeaking ? 
-                  <VolumeX className="w-4 h-4" /> : 
-                  <Volume2 className="w-4 h-4" />
-                }
+                <Trophy className="w-4 h-4 mr-1" />
+                My Schemes
+              </Button>
+              <Button
+                onClick={() => {
+                  profileManager.clearProfile();
+                  window.location.reload();
+                }}
+                variant="outline"
+                size="sm"
+                className="flex-1 bg-blue-700 border-blue-600 text-white hover:bg-blue-600"
+              >
+                <User className="w-4 h-4 mr-1" />
+                New Profile
               </Button>
             </div>
-
-            {userProfile && (
-              <div className="text-center">
-                <p className="text-blue-200 text-xs">
-                  Logged in as {userProfile.name}
-                </p>
-                <p className="text-blue-300 text-xs">
-                  Profile {onboardingProgress}% complete
-                </p>
-                {userProfile.attributes?.income && (
-                  <Badge className="bg-green-600 text-white mt-1">
-                    ₹{userProfile.attributes.income.toLocaleString()}
-                  </Badge>
-                )}
-              </div>
-            )}
-
-            {!isOnboarding && userProfile && (
-              <div className="flex space-x-2">
-                <Button
-                  onClick={() => onPageChange?.('recommendations')}
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 bg-blue-700 border-blue-600 text-white hover:bg-blue-600"
-                >
-                  <Trophy className="w-4 h-4 mr-1" />
-                  My Schemes
-                </Button>
-                <Button
-                  onClick={() => {
-                    profileManager.clearProfile();
-                    window.location.reload();
-                  }}
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 bg-blue-700 border-blue-600 text-white hover:bg-blue-600"
-                >
-                  <User className="w-4 h-4 mr-1" />
-                  New Profile
-                </Button>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
