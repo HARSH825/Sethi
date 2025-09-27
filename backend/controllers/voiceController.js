@@ -1,10 +1,10 @@
-// backend/controllers/voiceController.js (COMPLETE UPDATED FILE)
+// backend/controllers/voiceController.js (ORIGINAL LENIENT VERSION)
 import voiceService from '../services/voiceService.js';
 import llmService from '../services/llmService.js';
 
 class VoiceController {
   /**
-   * Process voice input during onboarding (COMPLETE WITH VALIDATION)
+   * Process voice input during onboarding (ORIGINAL WORKING VERSION)
    */
   async processOnboarding(req, res) {
     try {
@@ -48,116 +48,27 @@ class VoiceController {
       // Step 2: Extract structured data with Gemini
       const extractionResult = await llmService.extractOnboardingData(transcript, currentField);
       
-      console.log(`🔍 Extraction result:`, {
-        success: extractionResult.success,
-        confidence: extractionResult.confidence,
-        needsConfirmation: extractionResult.needsConfirmation,
-        value: extractionResult.value
-      });
-
-      // CRITICAL FIX: Check if extraction failed or confidence is too low
       if (!extractionResult.success) {
         await voiceService.cleanupAudioFile(audioFilePath);
-        
-        const retryResponse = await llmService.generateRetryResponse(currentField, transcript);
-        
-        // Emit WebSocket event for retry (DO NOT ADVANCE)
-        const io = req.app.get('io');
-        const eventData = {
-          type: 'extraction-failed',
-          field: currentField,
-          transcript: transcript,
-          response: retryResponse.response,
-          nextField: currentField, // SAME FIELD - DON'T ADVANCE
-          progress: this.calculateOnboardingProgress(currentField) - 14, // Don't increase progress
-          needsConfirmation: true,
-          isComplete: false,
-          timestamp: new Date()
-        };
-
-        if (userId && io) {
-          io.to(`user-${userId}`).emit('onboarding-progress', eventData);
-        }
-
-        return res.json({
-          success: false, // CRITICAL: Mark as failed
-          transcript: transcript,
-          extractedValue: null,
-          confidence: extractionResult.confidence || 0,
-          needsConfirmation: true,
-          response: retryResponse.response,
-          nextField: currentField, // SAME FIELD
-          progress: this.calculateOnboardingProgress(currentField) - 14, // Don't advance progress
-          isComplete: false,
-          shouldRetry: true, // Flag to indicate retry needed
-          timestamp: new Date()
+        return res.status(400).json({
+          success: false,
+          message: extractionResult.error
         });
       }
 
-      // CRITICAL FIX: Check confidence threshold
-      const CONFIDENCE_THRESHOLD = 0.7; // 70% confidence required
-      if (extractionResult.confidence < CONFIDENCE_THRESHOLD || extractionResult.needsConfirmation) {
-        console.log(`⚠️ Low confidence (${extractionResult.confidence}) or needs confirmation for field: ${currentField}`);
-        
-        await voiceService.cleanupAudioFile(audioFilePath);
-        
-        const confirmationResponse = await llmService.generateConfirmationRequest(
-          currentField, 
-          extractionResult.value, 
-          extractionResult.confidence
-        );
-        
-        // Emit WebSocket event for confirmation (DO NOT ADVANCE)
-        const io = req.app.get('io');
-        const eventData = {
-          type: 'confirmation-needed',
-          field: currentField,
-          transcript: transcript,
-          extractedValue: extractionResult.value,
-          response: confirmationResponse.response,
-          nextField: currentField, // SAME FIELD - DON'T ADVANCE
-          progress: this.calculateOnboardingProgress(currentField) - 14, // Don't increase progress  
-          needsConfirmation: true,
-          confidence: extractionResult.confidence,
-          isComplete: false,
-          timestamp: new Date()
-        };
-
-        if (userId && io) {
-          io.to(`user-${userId}`).emit('onboarding-progress', eventData);
-        }
-
-        return res.json({
-          success: false, // CRITICAL: Mark as failed for low confidence
-          transcript: transcript,
-          extractedValue: extractionResult.value,
-          confidence: extractionResult.confidence,
-          needsConfirmation: true,
-          response: confirmationResponse.response,
-          nextField: currentField, // SAME FIELD
-          progress: this.calculateOnboardingProgress(currentField) - 14, // Don't advance
-          isComplete: false,
-          shouldRetry: true,
-          timestamp: new Date()
-        });
-      }
-
-      // ONLY ADVANCE IF EXTRACTION IS SUCCESSFUL AND CONFIDENT
-      console.log(`✅ Successful extraction for ${currentField}: ${extractionResult.value}`);
-
-      // Step 3: Determine next field (only if current extraction succeeded)
+      // Step 3: Determine next field
       const nextField = this.getNextOnboardingField(currentField);
 
-      // Step 4: Generate success response
+      // Step 4: Generate response
       const responseResult = await llmService.generateOnboardingResponse(
         { ...extractionResult, field: currentField }, 
         nextField
       );
 
-      // Step 5: Calculate progress (only advance if successful)
+      // Step 5: Calculate progress
       const progress = this.calculateOnboardingProgress(currentField);
 
-      console.log('📊 Successful Onboarding Progress:', {
+      console.log('📊 Onboarding Progress:', {
         currentField,
         extractedValue: extractionResult.value,
         progress,
@@ -165,7 +76,7 @@ class VoiceController {
         isComplete: nextField === null
       });
 
-      // Step 6: Emit via WebSocket (SUCCESS)
+      // Step 6: Emit via WebSocket
       const io = req.app.get('io');
       const eventData = {
         type: 'field-completed',
@@ -175,17 +86,17 @@ class VoiceController {
         response: responseResult.response,
         nextField: nextField,
         progress: progress,
-        needsConfirmation: false,
+        needsConfirmation: extractionResult.needsConfirmation,
         isComplete: nextField === null,
         timestamp: new Date()
       };
 
-      console.log('📡 Emitting SUCCESS WebSocket event to userId:', userId);
+      console.log('📡 Emitting WebSocket event to userId:', userId);
 
       if (userId && io) {
         io.to(`user-${userId}`).emit('onboarding-progress', eventData);
         io.emit('onboarding-progress-global', { ...eventData, userId });
-        console.log('✅ SUCCESS WebSocket events emitted');
+        console.log('✅ WebSocket events emitted successfully');
       }
 
       // Step 7: Cleanup and respond
@@ -196,16 +107,14 @@ class VoiceController {
         transcript: transcript,
         extractedValue: extractionResult.value,
         confidence: extractionResult.confidence,
-        needsConfirmation: false,
+        needsConfirmation: extractionResult.needsConfirmation,
         response: responseResult.response,
         nextField: nextField,
         progress: progress,
         isComplete: nextField === null,
-        shouldRetry: false,
         timestamp: new Date()
       };
 
-      console.log('📤 Sending SUCCESS HTTP response');
       res.json(httpResponse);
 
     } catch (error) {
@@ -224,7 +133,7 @@ class VoiceController {
   }
 
   /**
-   * Process voice navigation commands (ENHANCED FOR PHASE 1)
+   * Process voice navigation commands
    */
   async processNavigation(req, res) {
     try {
@@ -301,7 +210,7 @@ class VoiceController {
   }
 
   /**
-   * Process scheme-specific voice commands (PHASE 1 ENHANCEMENT)
+   * Process scheme-specific voice commands
    */
   async processSchemeNavigation(req, res) {
     try {
@@ -413,17 +322,14 @@ class VoiceController {
 
       res.json({
         success: true,
-        message: 'Voice service health check - Phase 1 Complete with Validation',
+        message: 'Voice service health check - Phase 1 Complete',
         services,
         elevenLabsStatus,
         features: {
           onboardingVoice: true,
           navigationVoice: true,
           schemeNavigation: true,
-          webSocketRealTime: true,
-          validationLogic: true,
-          confidenceThreshold: true,
-          retryMechanism: true
+          webSocketRealTime: true
         },
         timestamp: new Date(),
         uptime: process.uptime()

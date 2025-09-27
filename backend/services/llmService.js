@@ -1,18 +1,18 @@
-// backend/services/llmService.js (COMPLETE UPDATED FILE)
+// backend/services/llmService.js (ORIGINAL VERSION WITH ORIGINAL PROMPTS)
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 class LLMService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     this.model = this.genAI.getGenerativeModel({ 
-      model: 'gemini-2.0-flash',
+      model: 'gemini-1.5-flash',
       generationConfig: {
         temperature: 0.7,
         maxOutputTokens: 1024,
       }
     });
     
-    console.log('🧠 Gemini LLM service initialized - Phase 1 Complete with Validation Fixes');
+    console.log('🧠 Gemini LLM service initialized - Phase 1 Complete with Bug Fixes');
   }
 
   async extractOnboardingData(transcript, currentField) {
@@ -22,45 +22,30 @@ class LLMService {
 Current field: ${currentField}
 User response: "${transcript}"
 
-STRICT VALIDATION RULES:
-- Only return success: true if you can confidently extract the required information
-- Set confidence to 0.1-0.4 for unclear/ambiguous responses
-- Set confidence to 0.5-0.7 for partially clear responses  
-- Set confidence to 0.8-1.0 for very clear responses
-- Set needsConfirmation: true if confidence < 0.8 or if ambiguous
-
 Extract and return JSON:
 {
-  "success": true_or_false,
-  "value": "extracted_value_or_null",
-  "confidence": 0.0_to_1.0,
-  "needsConfirmation": true_or_false
+  "value": "extracted_value",
+  "confidence": 0.9,
+  "needsConfirmation": false
 }
 
-Field-specific validation:
-- name: Must be a clear full name (not just "yes", "no", unclear sounds)
-- dob: Must be convertible to YYYY-MM-DD format (e.g., "15th June 1985" → "1985-06-15")
-- location: Must include state/city (not just "here", "there", unclear location)
-- income: Must be a clear number in rupees (monthly), reject vague amounts
-- family_size: Must be a clear number (1-20 range), not "many", "few"
-- occupation: Must be a clear job/work description (not "work", "job")
-- documents: Must clearly indicate yes/no or list specific documents
+Field-specific guidelines:
+- name: Extract full name, handle Indian names, Sanskrit names, Hindi names
+- dob: Convert to YYYY-MM-DD format (e.g., "15th June 1985" → "1985-06-15")
+- location: Extract state and district if mentioned, format as "State, District"
+- income: Extract numeric value in rupees (monthly), remove commas and words
+- family_size: Extract number of family members (just the number)
+- occupation: Standardize occupation names (farmer, engineer, teacher, business, student, etc.)
+- documents: Extract yes/no for document possession, return "yes" or list of documents
 
-REJECT these unclear responses:
-- Unclear sounds: "hmm", "uh", "yeah", mumbling
-- Non-answers: "I don't know", "maybe", "sort of"
-- Too vague: "some", "many", "around", "about"
-- Wrong context: answering different question
+Examples:
+- "My name is राज कुमार" → {"value": "राज कुमार", "confidence": 0.95}
+- "I was born on 15th June 1985" → {"value": "1985-06-15", "confidence": 0.9}
+- "I live in Delhi, Dwarka" → {"value": "Delhi, Dwarka", "confidence": 0.9}
+- "My income is 45 thousand per month" → {"value": "45000", "confidence": 0.9}
+- "We are 4 people in family" → {"value": "4", "confidence": 0.9}
 
-Examples of FAILED extraction (confidence < 0.5):
-- name: "uh, yeah" → {"success": false, "value": null, "confidence": 0.2}
-- income: "some money" → {"success": false, "value": null, "confidence": 0.3}
-- location: "here" → {"success": false, "value": null, "confidence": 0.1}
-
-Examples of SUCCESSFUL extraction (confidence > 0.7):
-- name: "My name is राज कुमार" → {"success": true, "value": "राज कुमार", "confidence": 0.95}
-- income: "45 thousand per month" → {"success": true, "value": "45000", "confidence": 0.9}
-- location: "Delhi, Dwarka" → {"success": true, "value": "Delhi, Dwarka", "confidence": 0.9}`;
+If unclear, set needsConfirmation: true`;
 
       const result = await this.model.generateContent(prompt);
       const responseText = result.response.text();
@@ -68,27 +53,13 @@ Examples of SUCCESSFUL extraction (confidence > 0.7):
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
-        
-        // Additional validation layer
-        if (parsed.success && (!parsed.value || parsed.value.toString().trim().length < 2)) {
-          parsed.success = false;
-          parsed.confidence = 0.1;
-          parsed.needsConfirmation = true;
-        }
-        
-        // Ensure confidence is reasonable
-        if (parsed.confidence > 0.95) parsed.confidence = 0.9;
-        if (parsed.confidence < 0.1) parsed.confidence = 0.1;
-        
-        console.log(`🔍 Extraction result for ${currentField}:`, parsed);
         return { success: true, ...parsed };
       }
       
-      // Fallback for unclear responses
       return {
-        success: false,
-        value: null,
-        confidence: 0.2,
+        success: true,
+        value: responseText.trim(),
+        confidence: 0.7,
         needsConfirmation: true
       };
 
@@ -97,9 +68,8 @@ Examples of SUCCESSFUL extraction (confidence > 0.7):
       return {
         success: false,
         error: 'Could not understand the response. Please try again.',
-        value: null,
-        confidence: 0.1,
-        needsConfirmation: true
+        value: '',
+        confidence: 0
       };
     }
   }
@@ -113,12 +83,12 @@ Next field to ask: ${nextField || 'complete'}
 Confidence: ${extractedData.confidence}
 
 Generate a warm, conversational response that:
-1. Confirms what you understood: "Great! I got [value]" or "Perfect!"
+1. Confirms what you understood: "Great! I got [value]"
 2. ${nextField ? `Asks for the next field: ${nextField}` : 'Says profile is complete and mentions finding schemes'}
 
 Keep under 60 words, friendly and encouraging. Use simple language.
 
-Field prompts for next questions:
+Field prompts:
 - name → dob: "Perfect! Now, when were you born? You can say like '15th June 1985' or just 'June 1985'"
 - dob → location: "Got it! Which state and city do you live in?"
 - location → income: "Thanks! What's your monthly income in rupees?"
@@ -147,98 +117,6 @@ Field prompts for next questions:
       return {
         success: false,
         response: fallbackResponses[extractedData.field] || "Let's continue with the next question."
-      };
-    }
-  }
-
-  /**
-   * NEW: Generate retry response for failed extractions
-   */
-  async generateRetryResponse(currentField, transcript) {
-    try {
-      const prompt = `User tried to provide ${currentField} but said: "${transcript}"
-
-This was unclear or didn't contain the needed information.
-
-Generate a helpful retry message that:
-1. Acknowledges what they said politely
-2. Asks them to try again more clearly
-3. Gives a specific example for ${currentField}
-
-Field-specific examples:
-- name: "I didn't catch your name clearly. Could you please say your full name again? For example, 'My name is Raj Kumar'"
-- dob: "I couldn't understand your date of birth. Please try again like 'I was born on 15th June 1985'"
-- location: "I didn't get your location clearly. Please say your state and city like 'I live in Delhi, Dwarka'"
-- income: "I didn't get your income clearly. Please say it like 'My monthly income is 45 thousand rupees'"
-- family_size: "How many people are in your family? Please say the number clearly like 'We are 4 people'"
-- occupation: "What work do you do? Please tell me clearly like 'I am a farmer' or 'I work in software'"
-- documents: "Do you have Aadhaar card, PAN card, and bank account? Please say 'yes I have all' or 'no'"
-
-Keep under 50 words, be encouraging and specific.`;
-
-      const result = await this.model.generateContent(prompt);
-      return {
-        success: true,
-        response: result.response.text().trim()
-      };
-
-    } catch (error) {
-      const fallbacks = {
-        name: "I didn't catch your name clearly. Could you please say your full name again? For example, 'My name is Raj Kumar'",
-        dob: "I couldn't understand your date of birth. Please try again like 'I was born on 15th June 1985'",
-        location: "I didn't get your location. Could you say your state and city again like 'I live in Delhi'?",
-        income: "I didn't understand your income. Please say your monthly income clearly like '45 thousand rupees'",
-        family_size: "How many people are in your family? Please say the number clearly like 'We are 4 people'",
-        occupation: "What work do you do? Please tell me your occupation clearly like 'I am a farmer'",
-        documents: "Do you have Aadhaar card, PAN card, and bank account? Please say 'yes' or 'no'"
-      };
-
-      return {
-        success: false,
-        response: fallbacks[currentField] || "I didn't understand that clearly. Could you please try again?"
-      };
-    }
-  }
-
-  /**
-   * NEW: Generate confirmation request for low confidence extractions
-   */
-  async generateConfirmationRequest(currentField, extractedValue, confidence) {
-    try {
-      const prompt = `User provided ${currentField} and I extracted: "${extractedValue}" with confidence ${confidence}
-
-Generate a confirmation message that:
-1. Repeats what I understood
-2. Asks for confirmation
-3. Gives option to correct
-
-Examples:
-- "I understood your name as '${extractedValue}'. Is that correct? Say yes to continue or tell me your correct name."
-- "Did I get your income right as ₹${extractedValue}? Say yes or correct me."
-- "So you live in ${extractedValue}? Please confirm or tell me the correct location."
-
-Keep under 35 words, be polite and clear.`;
-
-      const result = await this.model.generateContent(prompt);
-      return {
-        success: true,
-        response: result.response.text().trim()
-      };
-
-    } catch (error) {
-      const fallbacks = {
-        name: `I understood your name as "${extractedValue}". Is that correct? Say yes to continue or tell me your correct name.`,
-        dob: `Did I get your date of birth right as ${extractedValue}? Say yes or correct me.`,
-        location: `So you live in ${extractedValue}? Please confirm or tell me the correct location.`,
-        income: `I understood your monthly income as ₹${extractedValue}. Is that right? Say yes or correct me.`,
-        family_size: `You have ${extractedValue} people in your family? Please confirm or correct me.`,
-        occupation: `Your work is ${extractedValue}? Say yes if correct or tell me your actual occupation.`,
-        documents: `You said ${extractedValue} about documents. Is that right? Please confirm.`
-      };
-
-      return {
-        success: false,
-        response: fallbacks[currentField] || `I understood ${currentField} as "${extractedValue}". Is that correct? Say yes to continue or correct me.`
       };
     }
   }
@@ -296,12 +174,8 @@ Examples:
     }
   }
 
-  /**
-   * Process scheme-specific navigation with proper error handling
-   */
   async processSchemeNavigation(transcript, schemeData, userProfile) {
     try {
-      // Handle null/undefined userProfile gracefully
       const safeUserProfile = userProfile || {
         name: 'User',
         attributes: {
@@ -372,7 +246,6 @@ Response guidelines:
         };
       }
 
-      // Fallback response
       const fallbackResponse = this.generateFallbackSchemeResponse(transcript, safeSchemeData);
       return {
         success: true,
@@ -393,9 +266,6 @@ Response guidelines:
     }
   }
 
-  /**
-   * Generate fallback response for scheme questions
-   */
   generateFallbackSchemeResponse(transcript, schemeData) {
     const lowerTranscript = transcript.toLowerCase();
     
