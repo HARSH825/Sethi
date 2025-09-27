@@ -38,6 +38,150 @@ class VoiceService {
       return false;
     }
   }
+// Add this method to voiceService.ts to handle form field processing specifically:
+
+// Add this method inside the VoiceService class:
+// Update the processFormFieldAudio method in your frontend voiceService.ts:
+
+async processFormFieldAudio(audioBlob: Blob, fieldData: {
+  fieldId: string;
+  fieldLabel: string;
+  fieldType: string;
+  schemeTitle: string;
+  userId: string;
+}): Promise<VoiceProcessingResult> {
+  const formData = new FormData();
+  formData.append('audio', audioBlob);
+  formData.append('userId', fieldData.userId);
+  formData.append('fieldId', fieldData.fieldId);
+  formData.append('fieldLabel', fieldData.fieldLabel);
+  formData.append('fieldType', fieldData.fieldType);
+  formData.append('schemeTitle', fieldData.schemeTitle);
+  formData.append('expectingValue', 'true');
+
+  try {
+    console.log('🎤 Processing form field audio:', fieldData.fieldLabel);
+    
+    // FIXED: Use the correct endpoint
+    const response = await fetch('http://localhost:3001/api/voice/process-form-field', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    console.log('📝 Form field processing result:', result);
+
+    return {
+      success: result.success,
+      response: result.response || result.extractedValue,
+      confidence: result.confidence || 0.8,
+      timestamp: new Date()
+    };
+
+  } catch (error) {
+    console.error('❌ Form field processing failed:', error);
+    return {
+      success: false,
+      response: 'Processing failed',
+      confidence: 0,
+      timestamp: new Date()
+    };
+  }
+}
+
+
+// Local fallback processing for form fields
+private async processFormFieldLocally(audioBlob: Blob, fieldData: {
+  fieldId: string;
+  fieldLabel: string;
+  fieldType: string;
+  schemeTitle: string;
+  userId: string;
+}): Promise<VoiceProcessingResult> {
+  console.log('🔄 Using local form field processing for:', fieldData.fieldLabel);
+  
+  // For demo purposes, we'll use speech recognition API if available
+  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    try {
+      const transcript = await this.speechToText(audioBlob);
+      let processedValue = transcript.trim();
+      
+      // Clean up the transcript for form fields
+      processedValue = processedValue
+        .replace(/^(background noise|noise)/i, '')
+        .replace(/[.,!?]$/, '') // Remove punctuation
+        .trim();
+
+      // Field-specific processing
+      if (fieldData.fieldType === 'number') {
+        const numbers = processedValue.match(/\d+/g);
+        if (numbers) {
+          processedValue = numbers.join('');
+        }
+      }
+
+      return {
+        success: true,
+        response: processedValue,
+        confidence: 0.8,
+        timestamp: new Date()
+      };
+    } catch (error) {
+      console.error('Speech recognition failed:', error);
+    }
+  }
+
+  // Ultimate fallback - return cleaned input
+  return {
+    success: true,
+    response: 'Unable to process audio',
+    confidence: 0.3,
+    timestamp: new Date()
+  };
+}
+
+// Helper method for speech to text
+private async speechToText(audioBlob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      reject(new Error('Speech recognition not supported'));
+      return;
+    }
+
+    // Convert blob to audio for recognition (simplified approach)
+    const audio = new Audio(URL.createObjectURL(audioBlob));
+    const recognition = new SpeechRecognition();
+    
+    recognition.lang = 'en-US';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      resolve(transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      reject(new Error(`Speech recognition error: ${event.error}`));
+    };
+
+    // This is a simplified approach - in a real implementation,
+    // you'd need to properly feed the audio to the recognition service
+    recognition.start();
+    
+    // Timeout after 5 seconds
+    setTimeout(() => {
+      recognition.stop();
+      reject(new Error('Speech recognition timeout'));
+    }, 5000);
+  });
+}
 
   async startRecording(): Promise<void> {
     if (this.isRecording) return;

@@ -3,9 +3,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 class LLMService {
   constructor() {
-    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    this.genAI = new GoogleGenerativeAI("AIzaSyC1gNPKqwzNdwYHsKfP610sg94ZtIsSOKQ");
     this.model = this.genAI.getGenerativeModel({ 
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.0-flash',
       generationConfig: {
         temperature: 0.7,
         maxOutputTokens: 1024,
@@ -316,6 +316,101 @@ Keep conversational, under 100 words, use simple language.`;
       return {
         success: false,
         explanation: `${scheme.title} provides benefits of ₹${scheme.benefitAmount} annually. Based on your profile, you may be eligible. Please check the detailed eligibility criteria to confirm.`
+      };
+    }
+  }
+
+  /**
+   * NEW: Extract form field value from transcript
+   */
+  async extractFormFieldValue(transcript, fieldContext) {
+    try {
+      const { fieldId, fieldLabel, fieldType, schemeTitle } = fieldContext;
+      
+      console.log('🧠 Extracting form field value with Gemini:', {
+        fieldId,
+        fieldLabel,
+        transcript: transcript.substring(0, 100) + '...'
+      });
+
+      const prompt = `
+Extract the specific value for a government form field from this voice transcript.
+
+Context:
+- Form: ${schemeTitle || 'Government Application Form'}
+- Field: ${fieldLabel}
+- Field ID: ${fieldId}
+- Field Type: ${fieldType}
+- User said: "${transcript}"
+
+Instructions:
+1. Extract ONLY the specific value the user provided for this field
+2. Remove any background noise mentions like "(background noise)"
+3. Clean up the value (remove filler words, fix capitalization)
+4. For names: Extract the actual name only
+5. For numbers: Extract only the numeric value
+6. For text fields: Extract the relevant text value
+
+Examples:
+- If user said "Santosh" for father's name → "Santosh"
+- If user said "My bank is State Bank of India" for bank name → "State Bank of India"
+- If user said "The account number is 1234567890" → "1234567890"
+- If user said "(background noise) John" for name → "John"
+
+Response format (JSON only):
+{
+  "success": true,
+  "value": "extracted_clean_value",
+  "confidence": 0.95,
+  "field_type": "${fieldType}"
+}
+
+Extract the value:`;
+
+      // This assumes a `callGemini` method exists. If not, this needs to be implemented.
+      // For now, let's use the existing `generateContent` for consistency.
+      const result = await this.model.generateContent(prompt);
+      const response = result.response.text();
+
+      if (!response) {
+        throw new Error('No response from Gemini');
+      }
+
+      // Parse the JSON response
+      let parsedResult;
+      try {
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsedResult = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error('No JSON found in response');
+        }
+      } catch (parseError) {
+        console.warn('Failed to parse Gemini response as JSON, extracting manually');
+        // Fallback: try to extract value manually
+        const cleanTranscript = transcript
+          .replace(/\(background noise\)/gi, '')
+          .replace(/^(my|the|his|her|name is|called|it is|this is)/gi, '')
+          .trim();
+        
+        parsedResult = {
+          success: true,
+          value: cleanTranscript,
+          confidence: 0.7,
+          field_type: fieldType
+        };
+      }
+
+      console.log('✅ Form field extraction result:', parsedResult);
+      return parsedResult;
+
+    } catch (error) {
+      console.error('❌ Form field extraction failed:', error);
+      return {
+        success: false,
+        error: error.message,
+        confidence: 0,
+        field_type: fieldContext.fieldType
       };
     }
   }

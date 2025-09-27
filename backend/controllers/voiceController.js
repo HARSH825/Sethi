@@ -1,4 +1,5 @@
-// backend/controllers/voiceController.js (ORIGINAL LENIENT VERSION)
+// backend/controllers/voiceController.js (UPDATED WITH FORM FIELD SUPPORT)
+
 import voiceService from '../services/voiceService.js';
 import llmService from '../services/llmService.js';
 
@@ -7,6 +8,7 @@ class VoiceController {
    * Process voice input during onboarding (ORIGINAL WORKING VERSION)
    */
   async processOnboarding(req, res) {
+    // ... existing processOnboarding code stays the same ...
     try {
       if (!req.file) {
         return res.status(400).json({
@@ -17,7 +19,6 @@ class VoiceController {
 
       const { userId, currentField, sessionData } = req.body;
       const audioFilePath = req.file.path;
-
       console.log(`🎤 Processing onboarding audio for field: ${currentField}, userId: ${userId}`);
 
       // Validate audio file
@@ -32,7 +33,6 @@ class VoiceController {
 
       // Step 1: Transcribe audio
       const transcriptionResult = await voiceService.transcribeAudio(audioFilePath);
-      
       if (!transcriptionResult.success) {
         await voiceService.cleanupAudioFile(audioFilePath);
         return res.status(400).json({
@@ -47,7 +47,6 @@ class VoiceController {
 
       // Step 2: Extract structured data with Gemini
       const extractionResult = await llmService.extractOnboardingData(transcript, currentField);
-      
       if (!extractionResult.success) {
         await voiceService.cleanupAudioFile(audioFilePath);
         return res.status(400).json({
@@ -61,7 +60,7 @@ class VoiceController {
 
       // Step 4: Generate response
       const responseResult = await llmService.generateOnboardingResponse(
-        { ...extractionResult, field: currentField }, 
+        { ...extractionResult, field: currentField },
         nextField
       );
 
@@ -92,7 +91,6 @@ class VoiceController {
       };
 
       console.log('📡 Emitting WebSocket event to userId:', userId);
-
       if (userId && io) {
         io.to(`user-${userId}`).emit('onboarding-progress', eventData);
         io.emit('onboarding-progress-global', { ...eventData, userId });
@@ -116,17 +114,106 @@ class VoiceController {
       };
 
       res.json(httpResponse);
-
     } catch (error) {
       console.error('❌ Voice onboarding error:', error);
-      
       if (req.file?.path) {
         await voiceService.cleanupAudioFile(req.file.path);
       }
-      
       res.status(500).json({
         success: false,
         message: 'Voice processing failed',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * NEW: Process voice input for form fields (FORM AUTO-FILL SUPPORT)
+   */
+  async processFormField(req, res) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'No audio file provided'
+        });
+      }
+
+      const { userId, fieldId, fieldLabel, fieldType, schemeTitle, expectingValue } = req.body;
+      const audioFilePath = req.file.path;
+      
+      console.log(`🎤 Processing form field audio for field: ${fieldLabel} (${fieldId}), userId: ${userId}`);
+
+      // Validate audio file
+      const validation = voiceService.validateAudioFile(req.file);
+      if (!validation.valid) {
+        await voiceService.cleanupAudioFile(audioFilePath);
+        return res.status(400).json({
+          success: false,
+          message: validation.error
+        });
+      }
+
+      // Step 1: Transcribe audio
+      const transcriptionResult = await voiceService.transcribeAudio(audioFilePath);
+      if (!transcriptionResult.success) {
+        await voiceService.cleanupAudioFile(audioFilePath);
+        return res.status(400).json({
+          success: false,
+          message: transcriptionResult.error,
+          details: transcriptionResult.details
+        });
+      }
+
+      const transcript = transcriptionResult.transcript;
+      console.log(`📝 Form field transcript for ${fieldLabel}:`, transcript);
+
+      // Step 2: Extract field value using LLM
+      const extractionResult = await llmService.extractFormFieldValue(transcript, {
+        fieldId,
+        fieldLabel,
+        fieldType,
+        schemeTitle
+      });
+
+      if (!extractionResult.success) {
+        await voiceService.cleanupAudioFile(audioFilePath);
+        return res.status(400).json({
+          success: false,
+          message: extractionResult.error || 'Failed to extract field value'
+        });
+      }
+
+      console.log('✅ Form field extraction successful:', {
+        fieldLabel,
+        extractedValue: extractionResult.value,
+        confidence: extractionResult.confidence
+      });
+
+      // Step 3: Cleanup and respond
+      await voiceService.cleanupAudioFile(audioFilePath);
+
+      const httpResponse = {
+        success: true,
+        transcript: transcript,
+        response: extractionResult.value, // The extracted field value
+        extractedValue: extractionResult.value,
+        confidence: extractionResult.confidence,
+        fieldId: fieldId,
+        fieldLabel: fieldLabel,
+        timestamp: new Date()
+      };
+
+      res.json(httpResponse);
+
+    } catch (error) {
+      console.error('❌ Form field processing error:', error);
+      if (req.file?.path) {
+        await voiceService.cleanupAudioFile(req.file.path);
+      }
+      res.status(500).json({
+        success: false,
+        message: 'Form field processing failed',
         error: error.message
       });
     }
@@ -146,11 +233,9 @@ class VoiceController {
 
       const { userId, pageContext, userProfile } = req.body;
       const audioFilePath = req.file.path;
-
       console.log('🎤 Processing navigation command for userId:', userId);
 
       const transcriptionResult = await voiceService.transcribeAudio(audioFilePath);
-      
       if (!transcriptionResult.success) {
         await voiceService.cleanupAudioFile(audioFilePath);
         return res.status(400).json(transcriptionResult);
@@ -196,11 +281,9 @@ class VoiceController {
 
     } catch (error) {
       console.error('❌ Voice navigation error:', error);
-      
       if (req.file?.path) {
         await voiceService.cleanupAudioFile(req.file.path);
       }
-      
       res.status(500).json({
         success: false,
         message: 'Voice navigation failed',
@@ -223,7 +306,6 @@ class VoiceController {
 
       const { userId, schemeData, userProfile } = req.body;
       const audioFilePath = req.file.path;
-
       console.log('🎤 Processing scheme navigation command for userId:', userId);
 
       const validation = voiceService.validateAudioFile(req.file);
@@ -236,7 +318,6 @@ class VoiceController {
       }
 
       const transcriptionResult = await voiceService.transcribeAudio(audioFilePath);
-      
       if (!transcriptionResult.success) {
         await voiceService.cleanupAudioFile(audioFilePath);
         return res.status(400).json({
@@ -287,11 +368,9 @@ class VoiceController {
 
     } catch (error) {
       console.error('❌ Scheme navigation error:', error);
-      
       if (req.file?.path) {
         await voiceService.cleanupAudioFile(req.file.path);
       }
-      
       res.status(500).json({
         success: false,
         message: 'Scheme navigation failed',
@@ -322,19 +401,19 @@ class VoiceController {
 
       res.json({
         success: true,
-        message: 'Voice service health check - Phase 1 Complete',
+        message: 'Voice service health check - Phase 2 Complete',
         services,
         elevenLabsStatus,
         features: {
           onboardingVoice: true,
           navigationVoice: true,
           schemeNavigation: true,
+          formFieldProcessing: true, // NEW FEATURE
           webSocketRealTime: true
         },
         timestamp: new Date(),
         uptime: process.uptime()
       });
-
     } catch (error) {
       res.status(500).json({
         success: false,
@@ -350,7 +429,6 @@ class VoiceController {
   getNextOnboardingField(currentField) {
     const sequence = ['name', 'dob', 'location', 'income', 'family_size', 'occupation', 'documents'];
     const currentIndex = sequence.indexOf(currentField);
-    
     return currentIndex >= 0 && currentIndex < sequence.length - 1
       ? sequence[currentIndex + 1]
       : null;
@@ -362,7 +440,6 @@ class VoiceController {
   calculateOnboardingProgress(currentField) {
     const sequence = ['name', 'dob', 'location', 'income', 'family_size', 'occupation', 'documents'];
     const currentIndex = sequence.indexOf(currentField);
-    
     if (currentIndex === -1) return 0;
     return Math.round(((currentIndex + 1) / sequence.length) * 100);
   }

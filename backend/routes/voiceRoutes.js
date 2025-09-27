@@ -1,4 +1,5 @@
-// backend/routes/voiceRoutes.js (COMPLETE AFTER PHASE 1)
+// backend/routes/voiceRoutes.js (COMPLETE WITH FORM FIELD SUPPORT)
+
 import express from 'express';
 import voiceController from '../controllers/voiceController.js';
 
@@ -26,7 +27,18 @@ router.post('/process-navigation', (req, res, next) => {
   });
 });
 
-// NEW: Scheme-specific navigation endpoint (PHASE 1 ENHANCEMENT)
+// NEW: Form field processing endpoint (FOR FORM AUTO-FILL)
+router.post('/process-form-field', (req, res, next) => {
+  const upload = req.app.get('upload');
+  upload.single('audio')(req, res, (err) => {
+    if (err) {
+      return next(err);
+    }
+    voiceController.processFormField(req, res);
+  });
+});
+
+// Scheme-specific navigation endpoint (PHASE 1 ENHANCEMENT)
 router.post('/process-scheme-navigation', (req, res, next) => {
   const upload = req.app.get('upload');
   upload.single('audio')(req, res, (err) => {
