@@ -1,0 +1,86 @@
+// backend/prisma/schema.prisma (CLEAN VERSION)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String?  @unique
+  email       String?  @unique
+  dob         DateTime?
+  
+  // Store address as JSON
+  address     Json?    // { state: string, district: string, pincode: string }
+  
+  // Store all attributes as JSON
+  attributes  Json?    // { income: number, age: number, occupation: string, family_size: number, is_farmer: boolean, etc. }
+  
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  applications Application[]
+  
+  @@map("users")
+}
+
+model Scheme {
+  id                   String    @id
+  title               String
+  description         String
+  agency              String
+  state               String    // 'ALL_INDIA' or specific state
+  benefitAmount       Int       // Amount in rupees
+  eligibilityCriteria Json?     // Complex eligibility rules
+  requiredDocuments   String[]  // Array of required documents
+  applicationUrl      String?   // Official application URL
+  tags                String[]  // For categorization and search
+  priority            Int       @default(50)
+  deadline            DateTime?
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  
+  // Relations
+  applications Application[]
+  
+  @@index([isActive])
+  @@index([state])
+  @@index([priority])
+  @@map("schemes")
+}
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED  
+  APPROVED
+  REJECTED
+  IN_PROGRESS
+}
+
+model Application {
+  id                String            @id @default(cuid())
+  applicationNumber String            @unique @default(cuid())
+  userId            String
+  schemeId          String
+  status            ApplicationStatus @default(DRAFT)
+  formData          Json?             // Store application form data
+  submittedAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  
+  // Relations
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheme            Scheme            @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([status]) 
+  @@map("applications")
+}
