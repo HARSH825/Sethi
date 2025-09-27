@@ -82,133 +82,176 @@ const SaarthiSidebar: React.FC<SaarthiSidebarProps> = ({
     conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [conversation]);
 
-  const initializeSaarthi = async (): Promise<void> => {
-    try {
-      console.log('🚀 Initializing Saarthi...');
-      
-      // Load cached profile
-      const profile = await profileManager.initializeProfile();
-      setUserProfile(profile);
-      
-      if (!profile) {
-        setIsOnboarding(true);
-        setCurrentField('name');
-        addMessage('saarthi', "Hi! I'm Saarthi, your personal government scheme assistant. I'll help you discover benefits you deserve! Let's start by getting to know you. What's your full name?");
-      } else {
-        addMessage('saarthi', `Welcome back, ${profile.name}! How can I help you today?`);
-      }
-      
-      // Initialize microphone
-      const hasPermission = await voiceService.initializeMicrophone();
-      setMicPermission(hasPermission);
-      console.log('🎤 Microphone permission:', hasPermission ? 'Granted' : 'Denied');
-      
-      // FIXED: Initialize voices for better TTS
-      await voiceService.initializeVoices();
-      
-      // Connect to WebSocket with detailed logging
-      const userId = profile?.id || `temp_${Date.now()}`;
-      console.log('🔌 Connecting WebSocket with userId:', userId);
-      
-      websocketService.connect(userId);
-      
-      // WebSocket event listeners with detailed logging
-      websocketService.on('session-joined', (data: any) => {
-        console.log('✅ WebSocket session joined:', data);
-        setConnectionStatus('connected');
-        
-        // Test the connection
-        setTimeout(() => {
-          websocketService.testConnection();
-        }, 1000);
-      });
-      
-      websocketService.on('onboarding-progress', handleOnboardingProgress);
-      
-      websocketService.on('navigation-response', handleNavigationResponse);
-      
-      websocketService.on('connection-error', (data: any) => {
-        console.error('❌ WebSocket connection error:', data);
-        setConnectionStatus('error');
-      });
-      
-      // Monitor connection status
-      const connectionCheckInterval = setInterval(() => {
-        const isConnected = websocketService.isConnected();
-        const status = websocketService.getConnectionStatus();
-        setConnectionStatus(status);
-      }, 5000);
-      
-      // Cleanup interval on unmount
-      return () => clearInterval(connectionCheckInterval);
-      
-    } catch (error) {
-      console.error('❌ Saarthi initialization failed:', error);
-      addMessage('saarthi', "I'm having trouble starting up. Please refresh the page and try again.");
-      setConnectionStatus('error');
-    }
-  };
+  // src/components/Saarthi/SaarthiSidebar.tsx (UPDATE initializeSaarthi method)
 
-  const handleOnboardingProgress = useCallback((data: any) => {
-    console.log('📝 Processing onboarding progress event:', data);
+const initializeSaarthi = async (): Promise<void> => {
+  try {
+    console.log('🚀 Initializing Saarthi...');
     
-    try {
-      // Update progress
-      if (data.progress !== undefined) {
-        console.log('📊 Updating progress from', onboardingProgress, 'to', data.progress);
-        setOnboardingProgress(data.progress);
-      }
+    // Load cached profile
+    const profile = await profileManager.initializeProfile();
+    setUserProfile(profile);
+    
+    if (!profile) {
+      setIsOnboarding(true);
+      setCurrentField('name');
+      const welcomeMessage = "Hi! I'm Saarthi, your personal government scheme assistant. I'll help you discover benefits you deserve! Let's start by getting to know you. What's your full name?";
+      addMessage('saarthi', welcomeMessage);
       
-      // Add messages to conversation
-      if (data.transcript) {
-        console.log('👤 Adding user message:', data.transcript);
+      // FIXED: Auto-speak the first message after a short delay
+      setTimeout(() => {
+        voiceService.speak(welcomeMessage);
+        setIsSpeaking(true);
+        setTimeout(() => setIsSpeaking(false), welcomeMessage.length * 40);
+      }, 1000); // 1 second delay to ensure everything is loaded
+      
+    } else {
+      const welcomeBackMessage = `Welcome back, ${profile.name}! How can I help you today?`;
+      addMessage('saarthi', welcomeBackMessage);
+      
+      // Also speak welcome back message
+      setTimeout(() => {
+        voiceService.speak(welcomeBackMessage);
+        setIsSpeaking(true);
+        setTimeout(() => setIsSpeaking(false), welcomeBackMessage.length * 40);
+      }, 1000);
+    }
+    
+    // Initialize microphone
+    const hasPermission = await voiceService.initializeMicrophone();
+    setMicPermission(hasPermission);
+    
+    // Initialize voices for better TTS
+    await voiceService.initializeVoices();
+    
+    // Connect to WebSocket
+    const userId = profile?.id || `temp_${Date.now()}`;
+    console.log('🔌 Connecting WebSocket with userId:', userId);
+    
+    websocketService.connect(userId);
+    
+    // WebSocket event listeners
+    websocketService.on('session-joined', (data: any) => {
+      console.log('✅ WebSocket session joined:', data);
+      setConnectionStatus('connected');
+      
+      setTimeout(() => {
+        websocketService.testConnection();
+      }, 1000);
+    });
+    
+    websocketService.on('onboarding-progress', handleOnboardingProgress);
+    websocketService.on('navigation-response', handleNavigationResponse);
+    websocketService.on('connection-error', (data: any) => {
+      console.error('❌ WebSocket connection error:', data);
+      setConnectionStatus('error');
+    });
+    
+    // Monitor connection status
+    const connectionCheckInterval = setInterval(() => {
+      const isConnected = websocketService.isConnected();
+      const status = websocketService.getConnectionStatus();
+      setConnectionStatus(status);
+    }, 5000);
+    
+    return () => clearInterval(connectionCheckInterval);
+    
+  } catch (error) {
+    console.error('❌ Saarthi initialization failed:', error);
+    addMessage('saarthi', "I'm having trouble starting up. Please refresh the page and try again.");
+    setConnectionStatus('error');
+  }
+};
+
+
+  // src/components/Saarthi/SaarthiSidebar.tsx (UPDATE handleOnboardingProgress method)
+
+const handleOnboardingProgress = useCallback((data: any) => {
+  console.log('📝 Processing onboarding progress event:', data);
+  
+  try {
+    // FIXED: Prevent duplicate responses by checking if we already processed this message
+    const messageId = `${data.field}_${data.transcript}_${data.timestamp}`;
+    const existingMessage = conversation.find(msg => 
+      msg.sender === 'saarthi' && 
+      msg.message === data.response &&
+      Math.abs(new Date(msg.timestamp).getTime() - new Date(data.timestamp).getTime()) < 2000 // Within 2 seconds
+    );
+    
+    if (existingMessage) {
+      console.log('⚠️ Duplicate response detected, skipping');
+      return;
+    }
+    
+    // Update progress first
+    if (data.progress !== undefined) {
+      console.log('📊 Updating progress from', onboardingProgress, 'to', data.progress);
+      setOnboardingProgress(data.progress);
+    }
+    
+    // Add user message only if we have a transcript
+    if (data.transcript && data.transcript.trim()) {
+      console.log('👤 Adding user message:', data.transcript);
+      
+      // Check if this user message already exists
+      const existingUserMessage = conversation.find(msg => 
+        msg.sender === 'user' && 
+        msg.message === data.transcript &&
+        Math.abs(new Date(msg.timestamp).getTime() - new Date(data.timestamp).getTime()) < 5000
+      );
+      
+      if (!existingUserMessage) {
         addMessage('user', data.transcript);
       }
-      
-      if (data.response) {
-        console.log('🤖 Adding Saarthi response:', data.response);
-        addMessage('saarthi', data.response);
-        
-        // Speak the response
-        setTimeout(() => {
-          voiceService.speak(data.response);
-          setIsSpeaking(true);
-          setTimeout(() => setIsSpeaking(false), data.response.length * 40); // Faster timing
-        }, 500);
-      }
-      
-      // Update profile with new data
-      if (data.field && data.extractedValue) {
-        console.log('💾 Updating profile field:', data.field, '=', data.extractedValue);
-        const updatedProfile = profileManager.updateProfileField(data.field as keyof UserProfile, data.extractedValue);
-        setUserProfile(updatedProfile);
-      }
-      
-      // Update current field
-      if (data.nextField) {
-        console.log('➡️ Moving to next field:', data.nextField);
-        setCurrentField(data.nextField as OnboardingField);
-      } else if (data.nextField === null) {
-        console.log('🏁 No more fields - onboarding complete');
-        setCurrentField(null);
-      }
-      
-      // Check if onboarding is complete
-      if (data.isComplete || data.nextField === null) {
-        console.log('🎉 Onboarding complete!');
-        setIsOnboarding(false);
-        setCurrentField(null);
-        addMessage('saarthi', "🎉 Perfect! Your profile is complete. Let me find government schemes tailored just for you...");
-        
-        setTimeout(() => {
-          completeOnboarding();
-        }, 2000);
-      }
-      
-    } catch (error) {
-      console.error('❌ Error processing onboarding progress:', error);
     }
-  }, [onboardingProgress]);
+    
+    // Add Saarthi response only if we have one and it's not duplicate
+    if (data.response && data.response.trim()) {
+      console.log('🤖 Adding Saarthi response:', data.response);
+      addMessage('saarthi', data.response);
+      
+      // Speak the response with a small delay
+      setTimeout(() => {
+        voiceService.speak(data.response);
+        setIsSpeaking(true);
+        setTimeout(() => setIsSpeaking(false), data.response.length * 40);
+      }, 500);
+    }
+    
+    // Update profile with new data
+    if (data.field && data.extractedValue) {
+      console.log('💾 Updating profile field:', data.field, '=', data.extractedValue);
+      const updatedProfile = profileManager.updateProfileField(data.field as keyof UserProfile, data.extractedValue);
+      setUserProfile(updatedProfile);
+    }
+    
+    // Update current field
+    if (data.nextField) {
+      console.log('➡️ Moving to next field:', data.nextField);
+      setCurrentField(data.nextField as OnboardingField);
+    } else if (data.nextField === null) {
+      console.log('🏁 No more fields - onboarding complete');
+      setCurrentField(null);
+    }
+    
+    // Check if onboarding is complete
+    if (data.isComplete || data.nextField === null) {
+      console.log('🎉 Onboarding complete!');
+      setIsOnboarding(false);
+      setCurrentField(null);
+      const completionMessage = "🎉 Perfect! Your profile is complete. Let me find government schemes tailored just for you...";
+      addMessage('saarthi', completionMessage);
+      
+      setTimeout(() => {
+        completeOnboarding();
+      }, 2000);
+    }
+    
+  } catch (error) {
+    console.error('❌ Error processing onboarding progress:', error);
+  }
+}, [conversation, onboardingProgress]); // Added conversation to dependencies
+
 
   const handleNavigationResponse = useCallback((data: any) => {
     console.log('🧭 Processing navigation response:', data);
